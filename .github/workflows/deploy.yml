@@ -1,0 +1,17 @@
+name: Deploy Boilerplate Lambda
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+jobs:
+  deploy-dev:
+    uses: Stentzler/caged-lambda-cicd/.github/workflows/lambda-python-zip.yml@main
+    with:
+      environment_name: dev
+      function_name: caged-dev-boilerplate
+      alias_name: dev
+      zip_path: dist/boilerplate-lambda.zip
+    secrets: inherit
