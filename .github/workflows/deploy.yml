@@ -6,6 +6,10 @@ on:
       - develop
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   deploy-dev:
     uses: Stentzler/caged-lambda-cicd/.github/workflows/lambda-python-zip.yml@main
