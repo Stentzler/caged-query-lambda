@@ -30,7 +30,7 @@ service = MetricsService(repository=repository, settings=settings)
 
 @inject_lambda_context(logger)
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    logger.debug("Starting CAGED metrics query")
+    logger.info("Starting CAGED metrics query")
 
     try:
         result = service.execute(event)
