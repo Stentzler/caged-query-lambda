@@ -1,69 +1,142 @@
-# Boilerplate Lambda
+# CAGED Query Lambda
 
-Base template for CAGED Python Lambda repositories packaged as ZIP artifacts.
+Read-only AWS Lambda used by the CAGED web application to retrieve monthly
+geographic job metrics from DynamoDB.
 
-The template follows the same repository contract used by the project Lambdas:
+The Lambda is packaged as a Python ZIP artifact and is designed for an API
+Gateway HTTP API v2 Lambda proxy integration.
 
-- Python 3.14
-- `uv` for dependency management
-- `ruff` for linting and formatting
-- `pytest` for tests
-- `pre-commit` for local checks
-- `debugpy` support for local debugging
-- `serverless-toolkit` for shared Lambda utilities
-- `make package` for the ZIP artifact consumed by `caged-lambda-cicd`
+## API
 
-## Structure
+### `GET /v1/metrics`
+
+Query parameters:
+
+| Parameter | Required | Description |
+| --- | --- | --- |
+| `locationType` | Yes | `COUNTRY`, `STATE`, or `CITY` |
+| `locationCode` | State/city only | IBGE state or city code |
+| `professionCode` | No | CBO family code; defaults to `ALL` |
+| `from` | No | First month in `YYYYMM` format |
+| `to` | No | Last month in `YYYYMM` format |
+
+`from` and `to` must be supplied together. Without them, the API queries the
+catalog's `latest_available_month`. The inclusive range is limited to 24 months
+by default and must include at least one catalog `available_months` value.
+
+Example:
+
+```http
+GET /v1/metrics?locationType=CITY&locationCode=292070&professionCode=7842&from=202501&to=202512
+```
+
+Successful responses contain an ordered `months` object:
+
+```json
+{
+  "dataset": "CAGED_GEO_JOB_METRICS",
+  "catalog_version": "2026-06-25T21:00:00Z",
+  "query": {
+    "location_type": "CITY",
+    "location_code": "292070",
+    "profession_code": "7842",
+    "from": "202501",
+    "to": "202502"
+  },
+  "location": {
+    "type": "CITY",
+    "code": "292070",
+    "name": "Maraú",
+    "state": {
+      "code": "29",
+      "name": "Bahia"
+    }
+  },
+  "profession": {
+    "code": "7842",
+    "title": "Alimentadores de linhas de produção"
+  },
+  "months": {
+    "202501": {
+      "admissions": 10,
+      "dismissals": 4,
+      "net_balance": 6,
+      "total_turnover": 14,
+      "avg_salary": 1518.0,
+      "salary_sum": 15180.0,
+      "salary_count": 10
+    },
+    "202502": {
+      "admissions": 0,
+      "dismissals": 0,
+      "net_balance": 0,
+      "total_turnover": 0,
+      "avg_salary": 0.0,
+      "salary_sum": 0.0,
+      "salary_count": 0
+    }
+  }
+}
+```
+
+Country queries attempt to read the 27 state aggregate items for each month.
+Missing state records contribute zero. Country average salary is calculated from
+the combined `salary_sum / salary_count` across returned state records.
+
+## Dataset catalog
+
+The Lambda reads availability from one metadata item in `caged_dataset_catalog`:
 
 ```text
-src/handler.py
-src/service.py
-src/settings.py
-src/exceptions.py
-tests/
-events/
-debug_handler.py
+PK = DATASET#CAGED_GEO_JOB_METRICS
+SK = METADATA
+available_months = ["202604"]
+latest_available_month = 202604
+updated_at = 2026-06-25T21:00:00Z
 ```
 
-The IaC Lambda module defaults to `handler.lambda_handler`, so the production
-entry point lives in `src/handler.py` and exposes both `handler` and
-`lambda_handler`.
+The processing workflow can update this same item after a month is successfully
+loaded. The planned metadata Lambda can read this item and adjacent catalog
+items for professions and geographic selectors.
 
-## Setup
-
-```bash
-uv sync --all-groups
-uv run pre-commit install
-```
-
-## Environment Variables
-
-Use `.env.example` as reference:
+## Environment variables
 
 ```env
 ENVIRONMENT=local
-SOURCE_NAME=boilerplate
-POWERTOOLS_SERVICE_NAME=boilerplate
+SOURCE_NAME=caged-query
+METRICS_TABLE_NAME=caged_geo_job_metrics
+DATASET_CATALOG_TABLE_NAME=caged_dataset_catalog
+DATASET_ID=CAGED_GEO_JOB_METRICS
+CORS_ALLOWED_ORIGIN=http://localhost:3000
+MAX_QUERY_MONTHS=24
+BATCH_GET_MAX_RETRIES=3
+POWERTOOLS_SERVICE_NAME=caged-query
 POWERTOOLS_LOG_LEVEL=INFO
 POWERTOOLS_LOG_EVENT=false
 ```
 
-Logging is handled by `serverless-toolkit`, which uses AWS Lambda Powertools to
-generate structured JSON logs.
+Optional local DynamoDB configuration is supported through
+`DYNAMODB_ENDPOINT_URL` or `AWS_ENDPOINT_URL_DYNAMODB`.
 
 ## Development
 
 ```bash
+uv sync --all-groups
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 ```
 
-Run the local Lambda runner with:
+For local end-to-end execution, configure AWS credentials or a local DynamoDB
+endpoint, seed the metric and catalog tables, then run:
 
 ```bash
 uv run python debug_handler.py
 ```
+
+The local runner defaults to DynamoDB Local at `http://127.0.0.1:8000` and uses
+placeholder AWS credentials. Export a different `DYNAMODB_ENDPOINT_URL` before
+running when another endpoint is required.
 
 ## Packaging
 
@@ -71,27 +144,16 @@ uv run python debug_handler.py
 make package
 ```
 
-The package target creates:
+This creates `dist/caged-query-lambda.zip` with
+`handler.lambda_handler` as the entry point.
 
-```text
-dist/boilerplate-lambda.zip
-```
+## Required infrastructure
 
-When this template is copied for a real Lambda, rename the project, deployment
-workflow values, function name, and ZIP artifact to match that Lambda.
+Infrastructure remains in the global IaC repository. The Lambda role requires:
 
-## Deployment
+- `dynamodb:BatchGetItem` on `caged_geo_job_metrics`
+- `dynamodb:GetItem` on `caged_dataset_catalog`
 
-The caller workflow uses:
-
-```yaml
-uses: Stentzler/caged-lambda-cicd/.github/workflows/lambda-python-zip.yml@main
-```
-
-The `zip_path` input must match the artifact created by `make package`.
-
-## Notes
-
-This repository should contain only Lambda application code. Infrastructure as
-Code should live in the global IaC repository, and shared utilities should live
-in `serverless-toolkit`.
+API Gateway should expose public read-only `GET /v1/metrics`, configure the
+allowed frontend origin, add throttling and access logs, and invoke the Lambda
+alias used by the deployment workflow.

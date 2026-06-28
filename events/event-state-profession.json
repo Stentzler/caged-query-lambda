@@ -1,0 +1,23 @@
+{
+    "version": "2.0",
+    "routeKey": "GET /v1/metrics",
+    "rawPath": "/v1/metrics",
+    "rawQueryString": "locationType=STATE&locationCode=35&professionCode=7842&from=202601&to=202604",
+    "headers": {
+        "origin": "http://localhost:3000"
+    },
+    "requestContext": {
+        "http": {
+            "method": "GET",
+            "path": "/v1/metrics"
+        }
+    },
+    "queryStringParameters": {
+        "locationType": "STATE",
+        "locationCode": "41",
+        "professionCode": "2124",
+        "from": "202601",
+        "to": "202604"
+    },
+    "isBase64Encoded": false
+}

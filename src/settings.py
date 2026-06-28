@@ -8,13 +8,46 @@ class Settings:
 
     ENVIRONMENT: str = field(default_factory=lambda: os.getenv("ENVIRONMENT", "local"))
     SOURCE_NAME: str = field(
-        default_factory=lambda: os.getenv("SOURCE_NAME", "boilerplate")
+        default_factory=lambda: os.getenv("SOURCE_NAME", "caged-query")
+    )
+    METRICS_TABLE_NAME: str = field(
+        default_factory=lambda: os.getenv("METRICS_TABLE_NAME", "caged_geo_job_metrics")
+    )
+    DATASET_CATALOG_TABLE_NAME: str = field(
+        default_factory=lambda: os.getenv(
+            "DATASET_CATALOG_TABLE_NAME", "caged_dataset_catalog"
+        )
+    )
+    DATASET_ID: str = field(
+        default_factory=lambda: os.getenv("DATASET_ID", "CAGED_GEO_JOB_METRICS")
+    )
+    CORS_ALLOWED_ORIGIN: str = field(
+        default_factory=lambda: os.getenv("CORS_ALLOWED_ORIGIN", "*")
+    )
+    MAX_QUERY_MONTHS: int = field(
+        default_factory=lambda: int(os.getenv("MAX_QUERY_MONTHS", "24"))
+    )
+    BATCH_GET_MAX_RETRIES: int = field(
+        default_factory=lambda: int(os.getenv("BATCH_GET_MAX_RETRIES", "3"))
     )
 
     def __post_init__(self) -> None:
-        if not self.ENVIRONMENT.strip():
-            msg = "ENVIRONMENT must be configured"
+        required_values = {
+            "ENVIRONMENT": self.ENVIRONMENT,
+            "SOURCE_NAME": self.SOURCE_NAME,
+            "METRICS_TABLE_NAME": self.METRICS_TABLE_NAME,
+            "DATASET_CATALOG_TABLE_NAME": self.DATASET_CATALOG_TABLE_NAME,
+            "DATASET_ID": self.DATASET_ID,
+            "CORS_ALLOWED_ORIGIN": self.CORS_ALLOWED_ORIGIN,
+        }
+        for name, value in required_values.items():
+            if not value.strip():
+                msg = f"{name} must be configured"
+                raise ValueError(msg)
+
+        if self.MAX_QUERY_MONTHS < 1:
+            msg = "MAX_QUERY_MONTHS must be greater than zero"
             raise ValueError(msg)
-        if not self.SOURCE_NAME.strip():
-            msg = "SOURCE_NAME must be configured"
+        if self.BATCH_GET_MAX_RETRIES < 0:
+            msg = "BATCH_GET_MAX_RETRIES cannot be negative"
             raise ValueError(msg)

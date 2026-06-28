@@ -22,7 +22,7 @@ package:
 		--python .venv/bin/python \
 		.
 	cp -r src/* build/
-	cd build && zip -r ../dist/boilerplate-lambda.zip .
+	cd build && zip -r ../dist/caged-query-lambda.zip .
 
 clean:
 	rm -rf build dist .pytest_cache .ruff_cache

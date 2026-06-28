@@ -1,124 +1,99 @@
 import importlib
-import io
 import json
 import sys
 from types import ModuleType
 
 
 class FakeLambdaContext:
-    function_name = "boilerplate-test"
+    function_name = "caged-query-test"
     function_version = "$LATEST"
     invoked_function_arn = (
-        "arn:aws:lambda:us-east-1:123456789012:function:boilerplate-test"
+        "arn:aws:lambda:us-east-1:123456789012:function:caged-query-test"
     )
     memory_limit_in_mb = 128
     aws_request_id = "test-request-id"
-    log_group_name = "/aws/lambda/boilerplate-test"
+    log_group_name = "/aws/lambda/caged-query-test"
     log_stream_name = "2026/01/01/[$LATEST]abcdef"
 
 
 def load_handler_module(monkeypatch) -> ModuleType:
-    monkeypatch.setenv("SOURCE_NAME", "boilerplate-test")
-    monkeypatch.setenv("POWERTOOLS_SERVICE_NAME", "boilerplate-test")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    monkeypatch.setenv("SOURCE_NAME", "caged-query-test")
+    monkeypatch.setenv("POWERTOOLS_SERVICE_NAME", "caged-query-test")
     monkeypatch.setenv("POWERTOOLS_LOG_LEVEL", "INFO")
     monkeypatch.setenv("POWERTOOLS_LOG_EVENT", "false")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGIN", "https://example.com")
     sys.modules.pop("handler", None)
 
     return importlib.import_module("handler")
 
 
-def test_handler_returns_service_result(monkeypatch) -> None:
+def test_handler_returns_api_gateway_response(monkeypatch) -> None:
     handler_module = load_handler_module(monkeypatch)
     expected = {
-        "status": "ok",
-        "source": "boilerplate-test",
-        "event": {"hello": "world"},
+        "dataset": "CAGED_GEO_JOB_METRICS",
+        "query": {"location_type": "STATE"},
+        "months": {"202604": {"admissions": 1}},
     }
 
     class FakeService:
         def execute(self, event):
-            assert event == {"hello": "world"}
+            assert event == {"queryStringParameters": {"locationType": "STATE"}}
             return expected
 
-    class FakeLogger:
-        def __init__(self) -> None:
-            self.info_calls = []
-
-        def info(self, message, **context) -> None:
-            self.info_calls.append((message, context))
-
     monkeypatch.setattr(handler_module, "service", FakeService())
-    fake_logger = FakeLogger()
-    monkeypatch.setattr(handler_module, "logger", fake_logger)
 
-    response = handler_module.handler({"hello": "world"}, FakeLambdaContext())
-
-    assert response is expected
-    assert fake_logger.info_calls[-1] == (
-        "Finished boilerplate Lambda",
-        {"result": expected},
+    response = handler_module.lambda_handler(
+        {"queryStringParameters": {"locationType": "STATE"}},
+        FakeLambdaContext(),
     )
 
+    assert response["statusCode"] == 200
+    assert response["headers"]["Access-Control-Allow-Origin"] == "https://example.com"
+    assert json.loads(response["body"]) == expected
 
-def test_handler_propagates_service_error(monkeypatch) -> None:
+
+def test_handler_maps_invalid_query_to_400(monkeypatch) -> None:
     handler_module = load_handler_module(monkeypatch)
 
-    class FailingService:
+    class FakeService:
         def execute(self, event):
-            raise RuntimeError("boilerplate failed")
+            raise handler_module.InvalidMetricsQueryError("invalid query")
 
-    class FakeLogger:
-        def __init__(self) -> None:
-            self.exception_calls = []
+    monkeypatch.setattr(handler_module, "service", FakeService())
 
-        def info(self, message, **context) -> None:
-            pass
+    response = handler_module.lambda_handler({}, FakeLambdaContext())
 
-        def exception(self, message, **context) -> None:
-            self.exception_calls.append((message, context))
-
-    monkeypatch.setattr(handler_module, "service", FailingService())
-    fake_logger = FakeLogger()
-    monkeypatch.setattr(handler_module, "logger", fake_logger)
-
-    try:
-        handler_module.handler({}, FakeLambdaContext())
-    except RuntimeError as error:
-        assert str(error) == "boilerplate failed"
-    else:
-        raise AssertionError("Expected handler to propagate the service error")
-
-    assert fake_logger.exception_calls == [("Failed to execute boilerplate Lambda", {})]
+    assert response["statusCode"] == 400
+    assert json.loads(response["body"]) == {"message": "invalid query"}
 
 
-def test_lambda_handler_uses_toolkit_logger_with_lambda_context(monkeypatch) -> None:
+def test_handler_maps_data_unavailability_to_503(monkeypatch) -> None:
     handler_module = load_handler_module(monkeypatch)
 
-    log_stream = io.StringIO()
-    original_stream = handler_module.logger.registered_handler.stream
+    class FakeService:
+        def execute(self, event):
+            raise handler_module.DatasetCatalogUnavailableError("catalog unavailable")
 
-    try:
-        handler_module.logger.registered_handler.setStream(log_stream)
+    monkeypatch.setattr(handler_module, "service", FakeService())
 
-        handler_module.lambda_handler({}, FakeLambdaContext())
+    response = handler_module.lambda_handler({}, FakeLambdaContext())
 
-        logs = [
-            json.loads(line)
-            for line in log_stream.getvalue().splitlines()
-            if line.strip()
-        ]
+    assert response["statusCode"] == 503
 
-        assert logs
 
-        first_log = logs[0]
+def test_handler_hides_unexpected_errors(monkeypatch) -> None:
+    handler_module = load_handler_module(monkeypatch)
 
-        assert first_log["message"] == "Starting boilerplate Lambda"
-        assert first_log["service"] == "boilerplate-test"
-        assert first_log["function_name"] == "boilerplate-test"
-        assert first_log["function_request_id"] == "test-request-id"
-        assert first_log["function_memory_size"] == 128
-        assert first_log["function_arn"] == (
-            "arn:aws:lambda:us-east-1:123456789012:function:boilerplate-test"
-        )
-    finally:
-        handler_module.logger.registered_handler.setStream(original_stream)
+    class FakeService:
+        def execute(self, event):
+            raise RuntimeError("secret failure")
+
+    monkeypatch.setattr(handler_module, "service", FakeService())
+
+    response = handler_module.lambda_handler({}, FakeLambdaContext())
+
+    assert response["statusCode"] == 500
+    assert json.loads(response["body"]) == {"message": "Internal server error"}

@@ -1,0 +1,23 @@
+{
+    "version": "2.0",
+    "routeKey": "GET /v1/metrics",
+    "rawPath": "/v1/metrics",
+    "rawQueryString": "locationType=CITY&locationCode=292070&professionCode=ALL&from=202603&to=202604",
+    "headers": {
+        "origin": "http://localhost:3000"
+    },
+    "requestContext": {
+        "http": {
+            "method": "GET",
+            "path": "/v1/metrics"
+        }
+    },
+    "queryStringParameters": {
+        "locationType": "CITY",
+        "locationCode": "292070",
+        "professionCode": "ALL",
+        "from": "202603",
+        "to": "202604"
+    },
+    "isBase64Encoded": false
+}
