@@ -3,43 +3,65 @@
 Read-only AWS Lambda used by the CAGED web application to retrieve monthly
 geographic job metrics from DynamoDB.
 
-The Lambda is packaged as a Python ZIP artifact and is designed for an API
-Gateway HTTP API v2 Lambda proxy integration.
+The Lambda is packaged as a Python ZIP artifact and exposed through the
+private API Gateway REST API route `GET /v1/metrics`.
 
 ## API
 
 ### `GET /v1/metrics`
 
-Query parameters:
+Use query string parameters to choose the geography, optional profession, and
+optional month range.
 
 | Parameter | Required | Description |
 | --- | --- | --- |
 | `locationType` | Yes | `COUNTRY`, `STATE`, or `CITY` |
-| `locationCode` | State/city only | IBGE state or city code |
-| `professionCode` | No | CBO family code; defaults to `ALL` |
-| `from` | No | First month in `YYYYMM` format |
-| `to` | No | Last month in `YYYYMM` format |
+| `locationCode` | For `STATE` and `CITY` | IBGE state or city code. Ignored for `COUNTRY`. |
+| `professionCode` | No | CBO family code. Defaults to `ALL`. |
+| `from` | No | First month in `YYYYMM` format. Must be used with `to`. |
+| `to` | No | Last month in `YYYYMM` format. Must be used with `from`. |
 
-`from` and `to` must be supplied together. Without them, the API queries the
-catalog's `latest_available_month`. The inclusive range is limited to 24 months
-by default and must include at least one catalog `available_months` value.
+If `from` and `to` are omitted, the API returns only the catalog's
+`latest_available_month`. Ranges are inclusive, limited to 24 months by default,
+and must include at least one available dataset month.
 
-Example:
+Valid combinations:
+
+| Request | Meaning |
+| --- | --- |
+| `?locationType=COUNTRY` | Brazil total, all professions, latest month |
+| `?locationType=COUNTRY&professionCode=2124` | Brazil total for one CBO family |
+| `?locationType=STATE&locationCode=35` | State total for Sao Paulo |
+| `?locationType=CITY&locationCode=355030` | City total for Sao Paulo city |
+| `?locationType=CITY&locationCode=355030&professionCode=2237&from=202501&to=202512` | City + CBO family for a month range |
+
+Invalid combinations return `400` with a `message`, for example:
+
+| Request problem | Error |
+| --- | --- |
+| Missing or unsupported `locationType` | `locationType` must be one of `COUNTRY`, `STATE`, or `CITY` |
+| `STATE` or `CITY` without `locationCode` | `locationCode is required for STATE and CITY queries` |
+| Only `from` or only `to` | `from and to must be provided together` |
+| Month not `YYYYMM`, invalid month, `from > to`, or `to` after latest available month | Validation error message |
+| Range longer than `MAX_QUERY_MONTHS` | `The requested range cannot exceed N months` |
+| Range outside all available dataset months | `The requested range is outside available dataset months` |
+
+Example request:
 
 ```http
-GET /v1/metrics?locationType=CITY&locationCode=292070&professionCode=7842&from=202501&to=202512
+GET /v1/metrics?locationType=CITY&locationCode=292070&professionCode=7842&from=202501&to=202502
 ```
 
-Successful responses contain an ordered `months` object:
+Successful API Gateway responses use camelCase field names:
 
 ```json
 {
   "dataset": "CAGED_GEO_JOB_METRICS",
-  "catalog_version": "2026-06-25T21:00:00Z",
+  "catalogVersion": "2026-06-25T21:00:00Z",
   "query": {
-    "location_type": "CITY",
-    "location_code": "292070",
-    "profession_code": "7842",
+    "locationType": "CITY",
+    "locationCode": "292070",
+    "professionCode": "7842",
     "from": "202501",
     "to": "202502"
   },
@@ -60,28 +82,32 @@ Successful responses contain an ordered `months` object:
     "202501": {
       "admissions": 10,
       "dismissals": 4,
-      "net_balance": 6,
-      "total_turnover": 14,
-      "avg_salary": 1518.0,
-      "salary_sum": 15180.0,
-      "salary_count": 10
+      "netBalance": 6,
+      "totalTurnover": 14,
+      "avgSalary": 1518.0,
+      "salarySum": 15180.0,
+      "salaryCount": 10
     },
     "202502": {
       "admissions": 0,
       "dismissals": 0,
-      "net_balance": 0,
-      "total_turnover": 0,
-      "avg_salary": 0.0,
-      "salary_sum": 0.0,
-      "salary_count": 0
+      "netBalance": 0,
+      "totalTurnover": 0,
+      "avgSalary": 0.0,
+      "salarySum": 0.0,
+      "salaryCount": 0
     }
   }
 }
 ```
 
-Country queries attempt to read the 27 state aggregate items for each month.
-Missing state records contribute zero. Country average salary is calculated from
-the combined `salary_sum / salary_count` across returned state records.
+The Lambda returns the same shape internally with snake_case fields. API Gateway
+maps those response fields to camelCase for clients. Data availability failures
+return `503`; unexpected failures return `500`.
+
+Country queries read the 27 state aggregate items for each month. Missing state
+records contribute zero, and country average salary is calculated from combined
+`salarySum / salaryCount` across returned state records.
 
 ## Dataset catalog
 
@@ -154,6 +180,7 @@ Infrastructure remains in the global IaC repository. The Lambda role requires:
 - `dynamodb:BatchGetItem` on `caged_geo_job_metrics`
 - `dynamodb:GetItem` on `caged_dataset_catalog`
 
-API Gateway should expose public read-only `GET /v1/metrics`, configure the
+API Gateway should expose private read-only `GET /v1/metrics`, configure the
 allowed frontend origin, add throttling and access logs, and invoke the Lambda
 alias used by the deployment workflow.
+
