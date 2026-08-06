@@ -44,12 +44,22 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         logger.exception("Failed to execute CAGED metrics query")
         return _response(500, {"message": "Internal server error"})
 
-    logger.info(
-        "Finished CAGED metrics query",
-        month_count=len(result["months"]),
-        location_type=result["query"]["location_type"],
-    )
+    _log_success(result)
     return _response(200, result)
+
+
+def _log_success(result: dict[str, Any]) -> None:
+    query = result.get("query")
+    months = result.get("months")
+    if isinstance(query, dict) and isinstance(months, dict):
+        logger.info(
+            "Finished CAGED metrics query",
+            month_count=len(months),
+            location_type=query.get("location_type"),
+        )
+        return
+
+    logger.info("Finished CAGED dataset catalog query")
 
 
 def _response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:

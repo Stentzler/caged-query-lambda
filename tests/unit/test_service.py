@@ -8,17 +8,27 @@ from settings import Settings
 
 
 class FakeRepository:
-    def __init__(self, items=None, availability=None) -> None:
+    def __init__(self, items=None, availability=None, dataset_catalog=None) -> None:
         self.items = items or []
         self.availability = availability or {
             "available_months": ["202501", "202502", "202604"],
             "latest_available_month": "202604",
             "updated_at": "2026-06-25T21:00:00Z",
         }
+        self.dataset_catalog = dataset_catalog or {
+            "PK": "DATASET#CAGED_GEO_JOB_METRICS",
+            "SK": "METADATA",
+            "available_months": ["202604"],
+            "latest_available_month": "202604",
+            "file_count": Decimal("2"),
+        }
         self.requested_keys = []
 
     def get_availability(self):
         return self.availability
+
+    def get_dataset_catalog(self):
+        return self.dataset_catalog
 
     def batch_get_metrics(self, keys):
         self.requested_keys = list(keys)
@@ -120,6 +130,42 @@ def test_state_query_uses_latest_month_and_all_professions_by_default() -> None:
         "salary_sum": 3000,
         "salary_count": 2,
     }
+
+
+def test_dataset_catalog_request_returns_metadata_without_querying_metrics() -> None:
+    repository = FakeRepository(
+        dataset_catalog={
+            "PK": "DATASET#CAGED_GEO_JOB_METRICS",
+            "SK": "METADATA",
+            "available_months": ["202501", "202604"],
+            "latest_available_month": "202604",
+            "file_count": Decimal("2"),
+            "coverage": {"state_count": Decimal("27")},
+        }
+    )
+
+    response = build_service(repository).execute(
+        {"queryStringParameters": {"operation": "getDatasetCatalog"}}
+    )
+
+    assert response == {
+        "PK": "DATASET#CAGED_GEO_JOB_METRICS",
+        "SK": "METADATA",
+        "available_months": ["202501", "202604"],
+        "latest_available_month": "202604",
+        "file_count": 2,
+        "coverage": {"state_count": 27},
+    }
+    assert repository.requested_keys == []
+
+
+def test_dataset_catalog_request_can_use_direct_operation() -> None:
+    repository = FakeRepository()
+
+    response = build_service(repository).execute({"operation": "getDatasetCatalog"})
+
+    assert response["PK"] == "DATASET#CAGED_GEO_JOB_METRICS"
+    assert repository.requested_keys == []
 
 
 def test_city_profession_query_returns_range_with_missing_months() -> None:
