@@ -27,6 +27,15 @@ sys.path.insert(0, str(SRC_DIR))
 
 from handler import lambda_handler  # noqa: E402
 
+LOCAL_EVENTS = {
+    "country-all": PROJECT_ROOT / "events" / "event-country-all.json",
+    "dataset-catalog": {
+        "queryStringParameters": {
+            "operation": "getDatasetCatalog",
+        },
+    },
+}
+
 
 class LocalLambdaContext:
     function_name = "local-caged-query-lambda"
@@ -41,13 +50,27 @@ class LocalLambdaContext:
 
 
 def main() -> None:
-    event_path = PROJECT_ROOT / "events" / "event-country-all.json"
-    event_text = event_path.read_text() if event_path.exists() else ""
-    event = json.loads(event_text) if event_text.strip() else {}
+    event_name = sys.argv[1] if len(sys.argv) > 1 else "country-all"
+    event = _load_event(event_name)
 
     response = lambda_handler(event, LocalLambdaContext())
 
-    print(response)
+    print(json.dumps(response, indent=2, ensure_ascii=False))
+
+
+def _load_event(event_name: str) -> dict:
+    event_source = LOCAL_EVENTS.get(event_name)
+    if event_source is None:
+        available_events = ", ".join(sorted(LOCAL_EVENTS))
+        raise ValueError(
+            f"Unknown event '{event_name}'. Use one of: {available_events}"
+        )
+
+    if isinstance(event_source, Path):
+        event_text = event_source.read_text() if event_source.exists() else ""
+        return json.loads(event_text) if event_text.strip() else {}
+
+    return event_source
 
 
 if __name__ == "__main__":

@@ -55,6 +55,32 @@ def test_handler_returns_api_gateway_response(monkeypatch) -> None:
     assert json.loads(response["body"]) == expected
 
 
+def test_handler_returns_dataset_catalog_response(monkeypatch) -> None:
+    handler_module = load_handler_module(monkeypatch)
+    expected = {
+        "PK": "DATASET#CAGED_GEO_JOB_METRICS",
+        "SK": "METADATA",
+        "latest_available_month": "202604",
+    }
+
+    class FakeService:
+        def execute(self, event):
+            assert event == {
+                "queryStringParameters": {"operation": "getDatasetCatalog"}
+            }
+            return expected
+
+    monkeypatch.setattr(handler_module, "service", FakeService())
+
+    response = handler_module.lambda_handler(
+        {"queryStringParameters": {"operation": "getDatasetCatalog"}},
+        FakeLambdaContext(),
+    )
+
+    assert response["statusCode"] == 200
+    assert json.loads(response["body"]) == expected
+
+
 def test_handler_maps_invalid_query_to_400(monkeypatch) -> None:
     handler_module = load_handler_module(monkeypatch)
 

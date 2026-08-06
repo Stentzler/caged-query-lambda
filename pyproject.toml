@@ -12,6 +12,7 @@ serverless-toolkit = { git = "https://github.com/Stentzler/caged-serverless-tool
 
 [dependency-groups]
 dev = [
+    "ipdb",
     "pre-commit>=4.0.0",
     "debugpy>=1.8.0",
     "pytest>=8.0.0",

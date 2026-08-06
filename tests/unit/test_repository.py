@@ -59,9 +59,39 @@ def test_get_availability_reads_dataset_metadata_item() -> None:
     assert all(call["ConsistentRead"] is True for call in resource.catalog_table.calls)
 
 
+def test_get_dataset_catalog_reads_dataset_metadata_item() -> None:
+    resource = FakeResource(
+        catalog_items={
+            ("DATASET#CAGED_GEO_JOB_METRICS", "METADATA"): {
+                "PK": "DATASET#CAGED_GEO_JOB_METRICS",
+                "SK": "METADATA",
+                "latest_available_month": "202604",
+            },
+        }
+    )
+
+    catalog = build_repository(resource).get_dataset_catalog()
+
+    assert catalog["PK"] == "DATASET#CAGED_GEO_JOB_METRICS"
+    assert resource.catalog_table.calls == [
+        {
+            "Key": {
+                "PK": "DATASET#CAGED_GEO_JOB_METRICS",
+                "SK": "METADATA",
+            },
+            "ConsistentRead": True,
+        }
+    ]
+
+
 def test_get_availability_rejects_missing_metadata() -> None:
     with pytest.raises(DatasetCatalogUnavailableError, match="metadata"):
         build_repository(FakeResource()).get_availability()
+
+
+def test_get_dataset_catalog_rejects_missing_metadata() -> None:
+    with pytest.raises(DatasetCatalogUnavailableError, match="catalog metadata"):
+        build_repository(FakeResource()).get_dataset_catalog()
 
 
 def test_batch_get_chunks_requests_at_100_keys() -> None:

@@ -51,6 +51,21 @@ class MetricsRepository:
 
         return availability
 
+    def get_dataset_catalog(self) -> dict[str, Any]:
+        catalog = self._catalog_table.get_item(
+            Key={
+                "PK": f"DATASET#{self._dataset_id}",
+                "SK": "METADATA",
+            },
+            ConsistentRead=True,
+        ).get("Item")
+        if not catalog:
+            raise DatasetCatalogUnavailableError(
+                "Dataset catalog metadata is unavailable"
+            )
+
+        return catalog
+
     def batch_get_metrics(self, keys: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
         key_list = list(keys)
         items: list[dict[str, Any]] = []

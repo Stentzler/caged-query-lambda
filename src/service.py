@@ -10,6 +10,7 @@ from settings import Settings
 MetricsPayload = dict[str, int | float]
 MONTH_PATTERN = re.compile(r"^\d{6}$")
 MONEY_QUANTIZER = Decimal("0.01")
+GET_DATASET_CATALOG_OPERATION = "getDatasetCatalog"
 ALL_PROFESSIONS_CODE = "ALL"
 COUNTRY_CODE = "BR"
 COUNTRY_NAME = "Brasil"
@@ -62,6 +63,9 @@ class MetricsService:
         self._settings = settings
 
     def execute(self, event: object) -> dict[str, Any]:
+        if self._is_dataset_catalog_request(event):
+            return self._get_dataset_catalog()
+
         parameters = self._get_query_parameters(event)
         availability = self._load_availability()
         query = self._build_query(parameters, availability)
@@ -90,6 +94,38 @@ class MetricsService:
             "profession": self._build_profession(query, items),
             "months": monthly_metrics,
         }
+
+    def _is_dataset_catalog_request(self, event: object) -> bool:
+        if not isinstance(event, dict):
+            return False
+
+        return (
+            event.get("operation") == GET_DATASET_CATALOG_OPERATION
+            or self._get_operation_parameter(event) == GET_DATASET_CATALOG_OPERATION
+        )
+
+    def _get_operation_parameter(self, event: dict[str, Any]) -> str | None:
+        parameters = event.get("queryStringParameters") or {}
+        if not isinstance(parameters, dict):
+            return None
+
+        operation = parameters.get("operation")
+        return str(operation) if operation is not None else None
+
+    def _get_dataset_catalog(self) -> dict[str, Any]:
+        return self._to_json_safe(self._repository.get_dataset_catalog())
+
+    def _to_json_safe(self, value: Any) -> Any:
+        if isinstance(value, Decimal):
+            return self._json_number(value)
+        if isinstance(value, dict):
+            return {str(key): self._to_json_safe(item) for key, item in value.items()}
+        if isinstance(value, list | tuple):
+            return [self._to_json_safe(item) for item in value]
+        if isinstance(value, set):
+            return sorted(self._to_json_safe(item) for item in value)
+
+        return value
 
     def _get_query_parameters(self, event: object) -> dict[str, str]:
         if not isinstance(event, dict):
