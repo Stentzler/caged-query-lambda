@@ -1,4 +1,5 @@
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -79,6 +80,8 @@ class MetricsService:
         keys = self._build_metric_keys(query, readable_months)
         items = self._repository.batch_get_metrics(keys)
         monthly_metrics = self._build_monthly_metrics(query, items, available_months)
+        location_lookup = self._get_location_lookup(query, items)
+        profession_lookup = self._get_profession_lookup(query, items)
 
         return {
             "dataset": self._settings.DATASET_ID,
@@ -90,8 +93,8 @@ class MetricsService:
                 "from": query.start_month,
                 "to": query.end_month,
             },
-            "location": self._build_location(query, items),
-            "profession": self._build_profession(query, items),
+            "location": self._build_location(query, items, location_lookup),
+            "profession": self._build_profession(query, items, profession_lookup),
             "months": monthly_metrics,
         }
 
@@ -320,7 +323,10 @@ class MetricsService:
 
     def _aggregate_country(self, items: list[dict[str, Any]]) -> MetricsPayload:
         totals = {
-            field: sum(Decimal(str(item.get(field, 0))) for item in items)
+            field: sum(
+                (Decimal(str(item.get(field, 0))) for item in items),
+                Decimal("0"),
+            )
             for field in (
                 "admissions",
                 "dismissals",
@@ -381,10 +387,38 @@ class MetricsService:
             "salary_count": 0,
         }
 
+    def _get_location_lookup(
+        self,
+        query: MetricsQuery,
+        items: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if query.location_type == "COUNTRY" or self._first_text(items, "location_name"):
+            return None
+        if query.location_code is None:
+            return None
+
+        return self._repository.get_location_lookup(
+            location_type=query.location_type,
+            location_code=query.location_code,
+        )
+
+    def _get_profession_lookup(
+        self,
+        query: MetricsQuery,
+        items: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if query.profession_code == ALL_PROFESSIONS_CODE or self._first_text(
+            items, "family_title"
+        ):
+            return None
+
+        return self._repository.get_profession_lookup(query.profession_code)
+
     def _build_location(
         self,
         query: MetricsQuery,
         items: list[dict[str, Any]],
+        location_lookup: dict[str, Any] | None,
     ) -> dict[str, Any]:
         if query.location_type == "COUNTRY":
             return {
@@ -394,17 +428,18 @@ class MetricsService:
             }
 
         first_item = next(iter(items), {})
+        lookup_item = location_lookup or {}
         location = {
             "type": query.location_type,
             "code": query.location_code,
-            "name": (
-                str(first_item["location_name"])
-                if first_item.get("location_name")
-                else None
+            "name": self._first_text(
+                (first_item, lookup_item),
+                "location_name",
+                "name",
             ),
         }
         if query.location_type == "CITY":
-            location["state"] = self._build_city_state(query, first_item)
+            location["state"] = self._build_city_state(query, first_item, lookup_item)
 
         return location
 
@@ -412,29 +447,58 @@ class MetricsService:
         self,
         query: MetricsQuery,
         first_item: dict[str, Any],
+        lookup_item: dict[str, Any],
     ) -> dict[str, str | None]:
         state_code = str(
-            first_item.get("state_code") or (query.location_code or "")[:2]
+            first_item.get("state_code")
+            or lookup_item.get("state_code")
+            or (query.location_code or "")[:2]
         )
         return {
             "code": state_code or None,
-            "name": BRAZILIAN_STATE_NAMES.get(state_code),
+            "name": self._text(lookup_item.get("state_name"))
+            or BRAZILIAN_STATE_NAMES.get(state_code),
         }
 
     def _build_profession(
         self,
         query: MetricsQuery,
         items: list[dict[str, Any]],
+        profession_lookup: dict[str, Any] | None,
     ) -> dict[str, str | None]:
         first_item = next(iter(items), {})
+        if query.profession_code == ALL_PROFESSIONS_CODE:
+            title = "All professions"
+        else:
+            title = self._first_text(
+                (first_item, profession_lookup or {}),
+                "family_title",
+            )
+
         return {
             "code": query.profession_code,
-            "title": (
-                str(first_item["family_title"])
-                if first_item.get("family_title")
-                else None
-            ),
+            "title": title,
         }
+
+    def _first_text(
+        self,
+        items: Iterable[dict[str, Any]],
+        *field_names: str,
+    ) -> str | None:
+        for item in items:
+            for field_name in field_names:
+                text = self._text(item.get(field_name))
+                if text:
+                    return text
+
+        return None
+
+    def _text(self, value: Any) -> str | None:
+        if value is None:
+            return None
+
+        text = str(value).strip()
+        return text or None
 
     def _json_number(self, value: Decimal) -> int | float:
         if value == value.to_integral_value():

@@ -132,6 +132,9 @@ ENVIRONMENT=local
 SOURCE_NAME=caged-query
 METRICS_TABLE_NAME=caged_geo_job_metrics
 DATASET_CATALOG_TABLE_NAME=caged_dataset_catalog
+CBO_LOOKUP_TABLE_NAME=caged_cbo_lookup
+CBO_FAMILY_CODE_INDEX_NAME=family_code-index
+GEO_LOOKUP_TABLE_NAME=caged_geo_lookup
 DATASET_ID=CAGED_GEO_JOB_METRICS
 CORS_ALLOWED_ORIGIN=http://localhost:3000
 MAX_QUERY_MONTHS=24
@@ -179,8 +182,9 @@ Infrastructure remains in the global IaC repository. The Lambda role requires:
 
 - `dynamodb:BatchGetItem` on `caged_geo_job_metrics`
 - `dynamodb:GetItem` on `caged_dataset_catalog`
+- `dynamodb:GetItem` on `caged_geo_lookup`
+- `dynamodb:Query` on the `caged_cbo_lookup` `family_code-index` GSI
 
 API Gateway should expose private read-only `GET /v1/metrics`, configure the
 allowed frontend origin, add throttling and access logs, and invoke the Lambda
 alias used by the deployment workflow.
-

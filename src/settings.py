@@ -18,6 +18,17 @@ class Settings:
             "DATASET_CATALOG_TABLE_NAME", "caged_dataset_catalog"
         )
     )
+    CBO_LOOKUP_TABLE_NAME: str = field(
+        default_factory=lambda: os.getenv("CBO_LOOKUP_TABLE_NAME", "caged_cbo_lookup")
+    )
+    CBO_FAMILY_CODE_INDEX_NAME: str = field(
+        default_factory=lambda: os.getenv(
+            "CBO_FAMILY_CODE_INDEX_NAME", "family_code-index"
+        )
+    )
+    GEO_LOOKUP_TABLE_NAME: str = field(
+        default_factory=lambda: os.getenv("GEO_LOOKUP_TABLE_NAME", "caged_geo_lookup")
+    )
     DATASET_ID: str = field(
         default_factory=lambda: os.getenv("DATASET_ID", "CAGED_GEO_JOB_METRICS")
     )
@@ -37,6 +48,9 @@ class Settings:
             "SOURCE_NAME": self.SOURCE_NAME,
             "METRICS_TABLE_NAME": self.METRICS_TABLE_NAME,
             "DATASET_CATALOG_TABLE_NAME": self.DATASET_CATALOG_TABLE_NAME,
+            "CBO_LOOKUP_TABLE_NAME": self.CBO_LOOKUP_TABLE_NAME,
+            "CBO_FAMILY_CODE_INDEX_NAME": self.CBO_FAMILY_CODE_INDEX_NAME,
+            "GEO_LOOKUP_TABLE_NAME": self.GEO_LOOKUP_TABLE_NAME,
             "DATASET_ID": self.DATASET_ID,
             "CORS_ALLOWED_ORIGIN": self.CORS_ALLOWED_ORIGIN,
         }

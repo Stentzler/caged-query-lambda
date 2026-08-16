@@ -11,22 +11,56 @@ class FakeTable:
     def __init__(self, items) -> None:
         self.items = items
         self.calls = []
+        self.query_calls = []
 
     def get_item(self, **kwargs):
         self.calls.append(kwargs)
-        key = (kwargs["Key"]["PK"], kwargs["Key"]["SK"])
+        key = tuple(kwargs["Key"].values())
         return {"Item": self.items[key]} if key in self.items else {}
+
+    def query(self, **kwargs):
+        self.query_calls.append(kwargs)
+        family_code = kwargs["ExpressionAttributeValues"][":family_code"]
+        return {
+            "Items": [
+                item
+                for item in self.items.values()
+                if item.get("family_code") == family_code
+            ][: kwargs["Limit"]]
+        }
 
 
 class FakeResource:
     def __init__(self, catalog_items=None, batch_responses=None) -> None:
         self.catalog_table = FakeTable(catalog_items or {})
+        self.cbo_lookup_table = FakeTable(
+            {
+                ("2251",): {
+                    "family_code": "2251",
+                    "family_title": "Médicos clínicos",
+                }
+            }
+        )
+        self.geo_lookup_table = FakeTable(
+            {
+                ("412820", "CITY"): {
+                    "code": "412820",
+                    "type": "CITY",
+                    "name": "União da Vitória",
+                    "state_code": "41",
+                    "state_name": "Paraná",
+                }
+            }
+        )
         self.batch_responses = list(batch_responses or [])
         self.batch_calls = []
 
     def Table(self, name):
-        assert name == "catalog"
-        return self.catalog_table
+        return {
+            "catalog": self.catalog_table,
+            "cbo_lookup": self.cbo_lookup_table,
+            "geo_lookup": self.geo_lookup_table,
+        }[name]
 
     def batch_get_item(self, **kwargs):
         self.batch_calls.append(kwargs)
@@ -38,6 +72,9 @@ def build_repository(resource: FakeResource, retries: int = 3) -> MetricsReposit
         dynamodb_resource=resource,
         metrics_table_name="metrics",
         catalog_table_name="catalog",
+        cbo_lookup_table_name="cbo_lookup",
+        cbo_family_code_index_name="family_code-index",
+        geo_lookup_table_name="geo_lookup",
         dataset_id="CAGED_GEO_JOB_METRICS",
         batch_get_max_retries=retries,
     )
@@ -92,6 +129,52 @@ def test_get_availability_rejects_missing_metadata() -> None:
 def test_get_dataset_catalog_rejects_missing_metadata() -> None:
     with pytest.raises(DatasetCatalogUnavailableError, match="catalog metadata"):
         build_repository(FakeResource()).get_dataset_catalog()
+
+
+def test_get_location_lookup_reads_geo_lookup_item() -> None:
+    resource = FakeResource()
+
+    lookup = build_repository(resource).get_location_lookup(
+        location_type="CITY",
+        location_code="412820",
+    )
+
+    assert lookup == {
+        "code": "412820",
+        "type": "CITY",
+        "name": "União da Vitória",
+        "state_code": "41",
+        "state_name": "Paraná",
+    }
+    assert resource.geo_lookup_table.calls == [
+        {
+            "Key": {
+                "code": "412820",
+                "type": "CITY",
+            },
+            "ConsistentRead": True,
+        }
+    ]
+
+
+def test_get_profession_lookup_queries_family_code_index() -> None:
+    resource = FakeResource()
+
+    lookup = build_repository(resource).get_profession_lookup("2251")
+
+    assert lookup == {
+        "family_code": "2251",
+        "family_title": "Médicos clínicos",
+    }
+    assert resource.cbo_lookup_table.query_calls == [
+        {
+            "IndexName": "family_code-index",
+            "KeyConditionExpression": "family_code = :family_code",
+            "ExpressionAttributeValues": {":family_code": "2251"},
+            "ProjectionExpression": "family_code, family_title",
+            "Limit": 1,
+        }
+    ]
 
 
 def test_batch_get_chunks_requests_at_100_keys() -> None:

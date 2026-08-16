@@ -23,12 +23,40 @@ class FakeRepository:
             "file_count": Decimal("2"),
         }
         self.requested_keys = []
+        self.requested_location_lookups = []
+        self.requested_profession_lookups = []
 
     def get_availability(self):
         return self.availability
 
     def get_dataset_catalog(self):
         return self.dataset_catalog
+
+    def get_location_lookup(self, *, location_type, location_code):
+        self.requested_location_lookups.append(
+            {
+                "location_type": location_type,
+                "location_code": location_code,
+            }
+        )
+        if location_type == "CITY" and location_code == "412820":
+            return {
+                "code": "412820",
+                "type": "CITY",
+                "name": "União da Vitória",
+                "state_code": "41",
+                "state_name": "Paraná",
+            }
+        return None
+
+    def get_profession_lookup(self, family_code):
+        self.requested_profession_lookups.append(family_code)
+        if family_code == "2251":
+            return {
+                "family_code": "2251",
+                "family_title": "Médicos clínicos",
+            }
+        return None
 
     def batch_get_metrics(self, keys):
         self.requested_keys = list(keys)
@@ -237,6 +265,60 @@ def test_city_location_includes_parent_state() -> None:
             "name": "Bahia",
         },
     }
+
+
+def test_missing_city_profession_metrics_use_lookup_labels() -> None:
+    repository = FakeRepository(
+        items=[],
+        availability={
+            "available_months": ["202501"],
+            "latest_available_month": "202501",
+            "updated_at": "2026-06-25T21:00:00Z",
+        },
+    )
+
+    response = build_service(repository).execute(
+        event(
+            locationType="CITY",
+            locationCode="412820",
+            professionCode="2251",
+            **{"from": "202501", "to": "202501"},
+        )
+    )
+
+    assert response["location"] == {
+        "type": "CITY",
+        "code": "412820",
+        "name": "União da Vitória",
+        "state": {
+            "code": "41",
+            "name": "Paraná",
+        },
+    }
+    assert response["profession"] == {
+        "code": "2251",
+        "title": "Médicos clínicos",
+    }
+    assert response["months"]["202501"] == empty_metrics()
+    assert repository.requested_location_lookups == [
+        {
+            "location_type": "CITY",
+            "location_code": "412820",
+        }
+    ]
+    assert repository.requested_profession_lookups == ["2251"]
+
+
+def test_all_professions_title_does_not_require_lookup() -> None:
+    repository = FakeRepository(items=[])
+
+    response = build_service(repository).execute(event(locationType="COUNTRY"))
+
+    assert response["profession"] == {
+        "code": "ALL",
+        "title": "All professions",
+    }
+    assert repository.requested_profession_lookups == []
 
 
 def test_country_query_aggregates_all_states_with_weighted_salary() -> None:

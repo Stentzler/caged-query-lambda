@@ -81,6 +81,116 @@ def test_handler_returns_dataset_catalog_response(monkeypatch) -> None:
     assert json.loads(response["body"]) == expected
 
 
+def test_metrics_success_log_includes_query_context(monkeypatch) -> None:
+    handler_module = load_handler_module(monkeypatch)
+    info_calls = []
+
+    class FakeLogger:
+        def info(self, message, **kwargs):
+            info_calls.append((message, kwargs))
+
+        def warning(self, message, **kwargs):
+            raise AssertionError(f"unexpected warning: {message} {kwargs}")
+
+        def exception(self, message, **kwargs):
+            raise AssertionError(f"unexpected exception: {message} {kwargs}")
+
+    class FakeService:
+        def execute(self, event):
+            return {
+                "query": {
+                    "location_type": "CITY",
+                    "location_code": "412820",
+                    "profession_code": "2251",
+                    "from": "202501",
+                    "to": "202501",
+                },
+                "location": {
+                    "type": "CITY",
+                    "code": "412820",
+                    "name": "União da Vitória",
+                },
+                "profession": {
+                    "code": "2251",
+                    "title": "Médicos clínicos",
+                },
+                "months": {"202501": {"admissions": 0}},
+            }
+
+    monkeypatch.setattr(handler_module, "logger", FakeLogger())
+    monkeypatch.setattr(handler_module, "service", FakeService())
+
+    handler_module.lambda_handler({}, FakeLambdaContext())
+
+    assert info_calls[-1] == (
+        "Finished CAGED metrics query",
+        {
+            "month_count": 1,
+            "location_type": "CITY",
+            "location_code": "412820",
+            "location_name": "União da Vitória",
+            "from": "202501",
+            "to": "202501",
+            "profession_code": "2251",
+            "profession_name": "Médicos clínicos",
+        },
+    )
+
+
+def test_metrics_success_log_omits_profession_context_for_all(monkeypatch) -> None:
+    handler_module = load_handler_module(monkeypatch)
+    info_calls = []
+
+    class FakeLogger:
+        def info(self, message, **kwargs):
+            info_calls.append((message, kwargs))
+
+        def warning(self, message, **kwargs):
+            raise AssertionError(f"unexpected warning: {message} {kwargs}")
+
+        def exception(self, message, **kwargs):
+            raise AssertionError(f"unexpected exception: {message} {kwargs}")
+
+    class FakeService:
+        def execute(self, event):
+            return {
+                "query": {
+                    "location_type": "COUNTRY",
+                    "location_code": None,
+                    "profession_code": "ALL",
+                    "from": "202501",
+                    "to": "202501",
+                },
+                "location": {
+                    "type": "COUNTRY",
+                    "code": "BR",
+                    "name": "Brasil",
+                },
+                "profession": {
+                    "code": "ALL",
+                    "title": "All professions",
+                },
+                "months": {"202501": {"admissions": 0}},
+            }
+
+    monkeypatch.setattr(handler_module, "logger", FakeLogger())
+    monkeypatch.setattr(handler_module, "service", FakeService())
+
+    handler_module.lambda_handler({}, FakeLambdaContext())
+
+    assert info_calls[-1] == (
+        "Finished CAGED metrics query",
+        {
+            "month_count": 1,
+            "location_type": "COUNTRY",
+            "location_code": None,
+            "location_name": "Brasil",
+            "from": "202501",
+            "to": "202501",
+        },
+    )
+
+
 def test_handler_maps_invalid_query_to_400(monkeypatch) -> None:
     handler_module = load_handler_module(monkeypatch)
 
